@@ -19,7 +19,7 @@ def process_function(lines: list[str]) -> None:
 	connections: dict[str, list[str]] = {}
 	currentname = ""
 	functioname = ""
-
+	currentcounter = 1
 	for i in lines:
 		if not inblock:
 			# regex for checking for define
@@ -50,6 +50,7 @@ def process_function(lines: list[str]) -> None:
 			if contains(i, "ret "):
 				blocks[currentname].append(i)
 				inblock = False
+				currentcounter += 1
 				continue
 			# the issue is their can be multiple labels per br so
 			isBr = i.strip().startswith("br")
@@ -60,7 +61,15 @@ def process_function(lines: list[str]) -> None:
 					connections[currentname].append(x)
 				blocks[currentname].append(i)
 				inblock = False
+				currentcounter += 1
 				continue
+			if i.strip().startswith("call"):
+				# this is tricky because call will result in it pointing to a new edge
+				# which is its succsesorr
+
+				# that name will be the current name with a number appended
+				blocks[currentname].append(i)
+
 			blocks[currentname].append(i)
 	outputToFile(connections, functioname.strip("@"))
 
