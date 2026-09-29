@@ -1,0 +1,12 @@
+digraph {
+		Node0 [shape=record,label=""]
+		Node1 [shape=record,label=""]
+		Node2 [shape=record,label=""]
+		Node3 [shape=record,label=""]
+		Node4 [shape=record,label=""]
+		Node0 -> Node1 [label=0];
+		Node0 -> Node2 [label=1];
+		Node1 -> Node4 [label=0];
+		Node2 -> Node4 [label=0];
+		Node3 -> Node4 [label=0];
+}

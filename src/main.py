@@ -21,6 +21,8 @@ def process_function(lines: list[str]) -> None:
 	functioname = ""
 	currentcounter = 1
 	for i in lines:
+		if i.strip().startswith(";"):
+			continue
 		if not inblock:
 			# regex for checking for define
 			define = regex_define.match(i)
@@ -50,7 +52,7 @@ def process_function(lines: list[str]) -> None:
 			if contains(i, "ret "):
 				blocks[currentname].append(i)
 				inblock = False
-				currentcounter += 1
+				currentcounter = 1
 				continue
 			# the issue is their can be multiple labels per br so
 			isBr = i.strip().startswith("br")
@@ -61,14 +63,20 @@ def process_function(lines: list[str]) -> None:
 					connections[currentname].append(x)
 				blocks[currentname].append(i)
 				inblock = False
-				currentcounter += 1
+				currentcounter = 1
 				continue
-			if i.strip().startswith("call"):
-				# this is tricky because call will result in it pointing to a new edge
-				# which is its succsesorr
+			if re.search(r"\bcall\b", i):
+				callname = currentname + str(currentcounter)
+				returnname = currentname + str(currentcounter + 1)
+				connections[currentname].append(callname)
 
-				# that name will be the current name with a number appended
-				blocks[currentname].append(i)
+				blocks[callname] = [i]
+				connections[callname] = [returnname]
+				blocks[returnname] = []
+				connections[returnname] = []
+				currentname = returnname
+				currentcounter += 2
+				continue
 
 			blocks[currentname].append(i)
 	outputToFile(connections, functioname.strip("@"))
