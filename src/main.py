@@ -79,7 +79,7 @@ def process_function(lines: list[str]) -> None:
 				continue
 
 			blocks[currentname].append(i)
-	outputToFile(connections, functioname.strip("@"))
+	outputToFile(connections, functioname.strip("@"), blocks)
 
 
 def main() -> None:
@@ -127,13 +127,16 @@ def main() -> None:
 			process_function(functionlist)
 
 
-def outputToFile(connections: dict[str, list[str]], name: str) -> None:
+def outputToFile(
+	connections: dict[str, list[str]], name: str, blocks: dict[str, list[str]]
+) -> None:
 	outfile = Path(f"./{name}.dot")
 	x = 0
 	output = "digraph {\n"
 	nodes: dict[str, int] = {}
 	for key in connections:
-		output += "		Node" + str(x) + ' [shape=record,label=""]\n'
+		label = "\\n".join(blocks[key]).replace("\n", "\\n").replace("{", "").replace("}", "")
+		output += "		Node" + str(x) + f' [shape=record,label="{label}"]\n'
 		nodes[key] = x
 		x += 1
 	x = 0

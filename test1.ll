@@ -19,10 +19,8 @@ lbl_t:
         %varT = add i32 1, 0
         br label %end
 lbl_f:
-        %varF = add i32 2, 0
+        %varF = call i32(i32,i32) @main  (i32 1, i32 2)
         br label %end
-lbl_na:
-br label %end
 
 end:
         %var = phi i32 [%varT, %lbl_t], [%varF, %lbl_f]
