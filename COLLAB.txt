@@ -1,0 +1,2 @@
+I, Daniel Van Dalsem wrote almost everything.
+I did lookup the \b in re.search(r"\bphrase\b"). \b is word boundry which matches start points, end points, and things that break up words.

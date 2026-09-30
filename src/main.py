@@ -49,7 +49,7 @@ def process_function(lines: list[str]) -> None:
 		else:
 			# we are in a block
 			# so look for end points
-			if contains(i, "ret "):
+			if re.search(r"\bret\b", i):
 				blocks[currentname].append(i)
 				inblock = False
 				currentcounter = 1
