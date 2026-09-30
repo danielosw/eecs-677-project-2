@@ -135,7 +135,9 @@ def outputToFile(
 	output = "digraph {\n"
 	nodes: dict[str, int] = {}
 	for key in connections:
-		label = "\\n".join(blocks[key]).replace("\n", "\\n").replace("{", "").replace("}", "")
+		# this line is for testing to see what is in each block
+		# label = "\\n".join(blocks[key]).replace("\n", "\\n").replace("{", "").replace("}", "")
+		label = ""
 		output += "		Node" + str(x) + f' [shape=record,label="{label}"]\n'
 		nodes[key] = x
 		x += 1
