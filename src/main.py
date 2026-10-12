@@ -3,9 +3,42 @@ import re
 from operator import contains
 from pathlib import Path
 
-regex_define = re.compile(r"define .*? (.*?)\(")
-
-
+REGEX_LABEL = re.compile(r"label %(.*?)(?:\,|$)")
+REGEX_DEFINE = re.compile(r"define .*? (.*?)\(")
+REGEX_BLOCK_LABEL = re.compile(r"^\s*(.*?):")
+REGEX_RETURN = re.compile(r"\bret\b")
+REGEX_CALL = re.compile(r"\bcall\b")
+REGEX_STORE = re.compile(r"store (?P<storetype>.*?) %(?P<storefrom>.*?), ptr %(?P<storeto>.*?)$")
+REGEX_SOURCE = re.compile(r"%(?P<varname>.*?) {0,}= {0,}call .*?@(.*?)\b")
+REGEX_SINK = re.compile(r"\bcall void @SINK\(.*? %(?P<varname>.*?)\)")
+REGEX_LOAD = re.compile(r"%(?P<loadto>.*?)\s{0,}=\s{0,}load\s{0,}(?P<type>.*?),\s{0,}ptr %(?P<loadfrom>.*?)$")
+SECRET_SOURCES: dict[str, list[str]] = {}
+SINKS: dict[str, list[str]] = {}
+class expression:
+	expressiontype: str = ""
+	regexresult: re.Match[str] |None = None
+	text: str = ""
+	def __init__(self, text: str, expressiontype:str, regexresult: re.Match[str] | None):
+		self.expressiontype = expressiontype
+		self.regexresult = regexresult
+		self.text = text
+class block:
+	parts: list[expression] = []
+	name: str = ""
+	connections: list[str] = []
+	referenced: list[str] = []
+	setvars: list[str] = []
+	def __init__(self, name:str, connections: list[str] = [], referenced: list[str] = [], setvars: list[str] = [], parts:list[expression] = [],)
+		self.parts=parts 
+		self.name=name
+		self.connections=connections
+		self.referenced=referenced
+		self.setvars=setvars
+def complexproccessing(connections: dict[str, list[str]], functionname: str, blocks: dict[str, block]) -> None:
+	# currently we just want to do the following. starting from the first block go through each connection and check load and stores to see if we run into a sink.  
+	
+	# assume the first is the entry
+		
 def process_function(lines: list[str]) -> None:
 	# STARTS BLOCK: define, LABELNAME:.
 	# ENDS BLOCK: br, ret
@@ -15,7 +48,7 @@ def process_function(lines: list[str]) -> None:
 	# step 3: output graph
 	inblock = False
 	blocknames: list[str] = []
-	blocks: dict[str, list[str]] = {}
+	blocks: dict[str, block] = {}
 	connections: dict[str, list[str]] = {}
 	currentname = ""
 	functioname = ""
@@ -25,32 +58,30 @@ def process_function(lines: list[str]) -> None:
 			continue
 		if not inblock:
 			# regex for checking for define
-			define = regex_define.match(i)
+			define = REGEX_DEFINE.match(i)
 			if define is not None:
 				blocknames.append(define.group(1))
 				inblock = True
 				currentname = define.group(1)
-				blocks[currentname] = []
-				connections[currentname] = []
+				blocks[currentname] = block(currentname)
 				functioname = currentname
-				blocks[currentname].append(i)
+				blocks[currentname].parts.append(expression(i,"define",define))
 				continue
-			labels = re.match(r"(.*?):", i)
+			labels = REGEX_BLOCK_LABEL.match(i)
 			if labels is not None:
 				blocknames.append(labels.group(1))
 				currentname = labels.group(1)
-				blocks[currentname] = []
-				connections[currentname] = []
+				blocks[currentname] = block(currentname)
 
-				blocks[currentname].append(i)
+				blocks[currentname].parts.append(expression(i,"labels",labels))
 
 				inblock = True
 				continue
 		else:
 			# we are in a block
 			# so look for end points
-			if re.search(r"\bret\b", i):
-				blocks[currentname].append(i)
+			if REGEX_RETURN.search(i):
+				blocks[currentname].parts.append(expression(i,"return", None))
 				inblock = False
 				currentcounter = 1
 				continue
@@ -58,28 +89,36 @@ def process_function(lines: list[str]) -> None:
 			isBr = i.strip().startswith("br")
 			if isBr:
 				# now we can safly just match for label %LABEL
-				brLabels = re.findall(r"label %(.*?)(?:\,|$)", i)
+				brLabels = REGEX_LABEL.findall(i)
+				brs = REGEX_LABEL.match(i)
 				for x in brLabels:
-					connections[currentname].append(x)
-				blocks[currentname].append(i)
+					blocks[currentname].connections.append(x)
+				blocks[currentname].parts.append(expression(i,"br",brs))
 				inblock = False
 				currentcounter = 1
 				continue
-			if re.search(r"\bcall\b", i):
+			sink = REGEX_SINK.search(i)
+			if sink:
+				namer = sink.group("varname")
+				SINKS[currentname].append(namer)
+			if REGEX_SOURCE.search(i):
+				# add the source to the secret sources list
+				SECRET_SOURCES[currentname].append(REGEX_SOURCE.search(i).group("varname"))
+			call = REGEX_CALL.search(i)
+			if call:
 				callname = currentname + str(currentcounter)
 				returnname = currentname + str(currentcounter + 1)
-				connections[currentname].append(callname)
-
-				blocks[callname] = [i]
+				blocks[currentname].connections.append(callname)
+				blocks[callname] = block(callname,[],[],[],[expression(i,"call",call)])
 				connections[callname] = [returnname]
-				blocks[returnname] = []
-				connections[returnname] = []
+				blocks[returnname] = block(returnname)
 				currentname = returnname
 				currentcounter += 2
 				continue
 
-			blocks[currentname].append(i)
-	outputToFile(connections, functioname.strip("@"), blocks)
+			blocks[currentname].parts.append(expression(i,"unknown",None))
+	complexproccessing(connections, functioname.strip("@"), blocks)
+	outputToFile( functioname.strip("@"), blocks)
 
 
 def main() -> None:
@@ -104,7 +143,7 @@ def main() -> None:
 		name = ""
 		for i in lines:
 			if not infunction:
-				define = regex_define.match(i)
+				define = REGEX_DEFINE.match(i)
 				if define is not None:
 					name = define.group(1)
 					functions[name] = []
@@ -128,13 +167,13 @@ def main() -> None:
 
 
 def outputToFile(
-	connections: dict[str, list[str]], name: str, blocks: dict[str, list[str]]
+	name: str, blocks: dict[str, block]
 ) -> None:
 	outfile = Path(f"./{name}.dot")
 	x = 0
 	output = "digraph {\n"
 	nodes: dict[str, int] = {}
-	for key in connections:
+	for key in blocks:
 		# this line is for testing to see what is in each block
 		# label = "\\n".join(blocks[key]).replace("\n", "\\n").replace("{", "").replace("}", "")
 		label = ""
@@ -142,9 +181,9 @@ def outputToFile(
 		nodes[key] = x
 		x += 1
 	x = 0
-	for key, value in connections.items():
+	for key, value in blocks.items():
 		j = 0
-		for i in value:
+		for i in value.connections:
 			output += (
 				"		Node" + str(x) + " -> Node" + str(nodes[i]) + " [label=" + str(j) + "];\n"
 			)
