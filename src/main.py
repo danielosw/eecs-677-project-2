@@ -2,6 +2,7 @@ import argparse
 import re
 from operator import contains
 from pathlib import Path
+import contextlib
 
 REGEX_LABEL = re.compile(r"label %(.*?)(?:\,|$)")
 REGEX_DEFINE = re.compile(r"define .*? (.*?)\(")
@@ -54,25 +55,62 @@ class block:
 # just a bundle of information for traverse to return
 class traverseReturn:
 	# basiclly a in set order list of a being set to b
+	setto: list[dict[str, str]]
+	flowfound: bool
 
-	def __init__(self, setto: list[dict[str, str]]) -> None:
+	def __init__(self, setto: list[dict[str, str]], flowfound: bool) -> None:
 		self.setto = setto
+		self.flowfound = flowfound
+
+
+def resolve(name: str, values: dict[str, str]) -> str:
+	seen: set[str] = set()
+	while name in values and name not in seen:
+		seen.add(name)
+		name = values[name]
+	return name
 
 
 def traverse(
-	block: block, blocks: dict[str, block], setto: list[dict[str, str]], main: bool = True
-) -> list[dict[str, str]]:
-	# transform setto with blocks.setvars
-	# basically, if setvars has x=1 and setto has x=2, we want to transform setto to have x=1 instead of x=2
-	for i in block.setvars:
-		for j in setto:
-			if i.keys() == j.keys():
-				setto.remove(j)
-				setto.append(i)
-	for x in block.connections:
-		setto.extend(traverse(blocks[x], blocks, setto, False))
+	block: block, blocks: dict[str, block], setto: traverseReturn, fromblocks: list[str]
+) -> traverseReturn:
+	t = traverseReturn([], False)
+	values = {}
+	fromblocks.append(block.name)
+	for assignment in setto.setto:
+		for name, value in assignment.items():
+			values[name] = value
+	for assignment in block.setvars:
+		for name, value in assignment.items():
+			values[name] = resolve(value, values)
 
-	return setto
+	result: list[dict[str, str]] = []
+	for name, value in values.items():
+		result.append({name: value})
+	t.setto = result
+	for next_block in block.connections:
+		if next_block in blocks:
+			resulting = traverse(blocks[next_block], blocks, t, fromblocks)
+			result.extend(resulting.setto)
+			if resulting.flowfound:
+				t.flowfound = True
+	flowed = False
+	t.setto = result
+	if block.name in SINKS:
+		# list of all preceding sources
+		# includeds previus blocks sources
+
+		possible_sources = []
+		for fromblock in fromblocks:
+			with contextlib.suppress(KeyError):
+				possible_sources.extend(SECRET_SOURCES[fromblock])
+		for source in possible_sources:
+			for sink in SINKS[block.name]:
+				if resolve(source, values) == resolve(sink, values):
+					flowed = True
+	if flowed:
+		t.flowfound = flowed
+	return t
 
 
 def process_function(lines: list[str]) -> None:
@@ -141,9 +179,29 @@ def process_function(lines: list[str]) -> None:
 			if sink:
 				namer = sink.group("varname")
 				SINKS[currentname].append(namer)
+
 			if REGEX_SOURCE.search(i):
 				# add the source to the secret sources list
 				SECRET_SOURCES[currentname].append(REGEX_SOURCE.search(i).group("varname"))
+
+			store = REGEX_STORE.match(i.strip())
+			if store is not None:
+				storefrom = store.group("storefrom")
+				storeto = store.group("storeto")
+				blocks[currentname].setvars.append({storeto: storefrom})
+				blocks[currentname].referenced.extend([storefrom, storeto])
+				blocks[currentname].parts.append(expression(i, "store", store))
+				continue
+
+			load = REGEX_LOAD.match(i.strip())
+			if load is not None:
+				loadfrom = load.group("loadfrom")
+				loadto = load.group("loadto")
+				blocks[currentname].setvars.append({loadto: loadfrom})
+				blocks[currentname].referenced.extend([loadto, loadfrom])
+				blocks[currentname].parts.append(expression(i, "load", load))
+				continue
+
 			call = REGEX_CALL.search(i)
 			if call:
 				callname = currentname + str(currentcounter)
@@ -163,7 +221,13 @@ def process_function(lines: list[str]) -> None:
 				continue
 
 			blocks[currentname].parts.append(expression(i, "unknown", None))
-	traverse(blocks[functioname], blocks, [])
+	traverse_result = traverse(
+		blocks[functioname], blocks, traverseReturn([], False), [functioname]
+	)
+	if traverse_result.flowfound:
+		print("FLOW")
+	else:
+		print("NO FLOW")
 	outputToFile(functioname.strip("@"), blocks)
 
 

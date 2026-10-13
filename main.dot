@@ -1,9 +1,9 @@
 digraph {
-		Node0 [shape=record,label=""]
-		Node1 [shape=record,label=""]
-		Node2 [shape=record,label=""]
-		Node3 [shape=record,label=""]
-		Node4 [shape=record,label=""]
+		Node0 [shape=record,label="define i32 @main() \n\n  %aVar = alloca i32\n"]
+		Node1 [shape=record,label="  %secret = call i32 () @SOURCE()\n"]
+		Node2 [shape=record,label="  store i32 %secret, ptr %aVar\n\n  store i32 0, ptr %aVar\n\n  %a1 = load i32, ptr %aVar\n"]
+		Node3 [shape=record,label="  call void @SINK(i32 %a1)\n"]
+		Node4 [shape=record,label="  ret i32 0\n"]
 		Node0 -> Node1 [label=0];
 		Node1 -> Node2 [label=0];
 		Node2 -> Node3 [label=0];

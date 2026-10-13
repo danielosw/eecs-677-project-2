@@ -1,4 +1,4 @@
-define i32 @main23() {
+define i32 @main() #0 {
   %aVar = alloca i32
   %bVar = alloca i32
   %secret = call i32 () @SOURCE()
