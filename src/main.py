@@ -92,11 +92,13 @@ def traverse(
 		result.append({name: value})
 	t.setto = result
 	for next_block in block.connections:
-		if next_block in blocks:
+		if next_block in blocks and next_block not in fromblocks:
 			resulting = traverse(blocks[next_block], blocks, t, fromblocks)
 			result.extend(resulting.setto)
 			if resulting.flowfound:
 				t.flowfound = True
+	fromblocks.remove(block.name)
+
 	flowed = False
 	t.setto = result
 	if block.name in SINKS:
@@ -188,6 +190,7 @@ def process_function(lines: list[str]) -> None:
 				SECRET_SOURCES[currentname].append(REGEX_SOURCE.search(i).group("varname"))
 
 			store = REGEX_STORE.match(i.strip())
+			# dumb hack to handle constants in store not matching the standerd one.
 			if store is None:
 				store = REGEX_STORE_CONST.match(i.strip())
 			if store is not None:
