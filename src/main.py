@@ -11,34 +11,55 @@ REGEX_CALL = re.compile(r"\bcall\b")
 REGEX_STORE = re.compile(r"store (?P<storetype>.*?) %(?P<storefrom>.*?), ptr %(?P<storeto>.*?)$")
 REGEX_SOURCE = re.compile(r"%(?P<varname>.*?) {0,}= {0,}call .*?@(.*?)\b")
 REGEX_SINK = re.compile(r"\bcall void @SINK\(.*? %(?P<varname>.*?)\)")
-REGEX_LOAD = re.compile(r"%(?P<loadto>.*?)\s{0,}=\s{0,}load\s{0,}(?P<type>.*?),\s{0,}ptr %(?P<loadfrom>.*?)$")
+REGEX_LOAD = re.compile(
+	r"%(?P<loadto>.*?)\s{0,}=\s{0,}load\s{0,}(?P<type>.*?),\s{0,}ptr %(?P<loadfrom>.*?)$"
+)
 SECRET_SOURCES: dict[str, list[str]] = {}
 SINKS: dict[str, list[str]] = {}
+
+
 class expression:
 	expressiontype: str = ""
-	regexresult: re.Match[str] |None = None
+	regexresult: re.Match[str] | None = None
 	text: str = ""
-	def __init__(self, text: str, expressiontype:str, regexresult: re.Match[str] | None):
+
+	def __init__(self, text: str, expressiontype: str, regexresult: re.Match[str] | None):
 		self.expressiontype = expressiontype
 		self.regexresult = regexresult
 		self.text = text
+
+
 class block:
 	parts: list[expression] = []
 	name: str = ""
 	connections: list[str] = []
 	referenced: list[str] = []
 	setvars: list[str] = []
-	def __init__(self, name:str, connections: list[str] = [], referenced: list[str] = [], setvars: list[str] = [], parts:list[expression] = [],)
-		self.parts=parts 
-		self.name=name
-		self.connections=connections
-		self.referenced=referenced
-		self.setvars=setvars
-def complexproccessing(connections: dict[str, list[str]], functionname: str, blocks: dict[str, block]) -> None:
-	# currently we just want to do the following. starting from the first block go through each connection and check load and stores to see if we run into a sink.  
-	
+
+	def __init__(
+		self,
+		name: str,
+		connections: list[str] | None = None,
+		referenced: list[str] | None = None,
+		setvars: list[str] | None = None,
+		parts: list[expression] | None = None,
+	):
+		self.parts = [] if parts is None else parts
+		self.name = name
+		self.connections = [] if connections is None else connections
+		self.referenced = [] if referenced is None else referenced
+		self.setvars = [] if setvars is None else setvars
+
+
+def complexproccessing(
+	connections: dict[str, list[str]], functionname: str, blocks: dict[str, block]
+) -> None:
+	# currently we just want to do the following. starting from the first block go through each connection and check load and stores to see if we run into a sink.
+
 	# assume the first is the entry
-		
+	pass
+
+
 def process_function(lines: list[str]) -> None:
 	# STARTS BLOCK: define, LABELNAME:.
 	# ENDS BLOCK: br, ret
@@ -65,7 +86,10 @@ def process_function(lines: list[str]) -> None:
 				currentname = define.group(1)
 				blocks[currentname] = block(currentname)
 				functioname = currentname
-				blocks[currentname].parts.append(expression(i,"define",define))
+				blocks[currentname].parts.append(expression(i, "define", define))
+				SECRET_SOURCES[currentname] = []
+				SINKS[currentname] = []
+
 				continue
 			labels = REGEX_BLOCK_LABEL.match(i)
 			if labels is not None:
@@ -73,15 +97,16 @@ def process_function(lines: list[str]) -> None:
 				currentname = labels.group(1)
 				blocks[currentname] = block(currentname)
 
-				blocks[currentname].parts.append(expression(i,"labels",labels))
-
+				blocks[currentname].parts.append(expression(i, "labels", labels))
+				SECRET_SOURCES[currentname] = []
+				SINKS[currentname] = []
 				inblock = True
 				continue
 		else:
 			# we are in a block
 			# so look for end points
 			if REGEX_RETURN.search(i):
-				blocks[currentname].parts.append(expression(i,"return", None))
+				blocks[currentname].parts.append(expression(i, "return", None))
 				inblock = False
 				currentcounter = 1
 				continue
@@ -93,7 +118,7 @@ def process_function(lines: list[str]) -> None:
 				brs = REGEX_LABEL.match(i)
 				for x in brLabels:
 					blocks[currentname].connections.append(x)
-				blocks[currentname].parts.append(expression(i,"br",brs))
+				blocks[currentname].parts.append(expression(i, "br", brs))
 				inblock = False
 				currentcounter = 1
 				continue
@@ -109,16 +134,22 @@ def process_function(lines: list[str]) -> None:
 				callname = currentname + str(currentcounter)
 				returnname = currentname + str(currentcounter + 1)
 				blocks[currentname].connections.append(callname)
-				blocks[callname] = block(callname,[],[],[],[expression(i,"call",call)])
+				blocks[callname] = block(
+					callname,
+					connections=[returnname],
+					parts=[expression(i, "call", call)],
+				)
 				connections[callname] = [returnname]
 				blocks[returnname] = block(returnname)
 				currentname = returnname
+				SECRET_SOURCES[currentname] = []
+				SINKS[currentname] = []
 				currentcounter += 2
 				continue
 
-			blocks[currentname].parts.append(expression(i,"unknown",None))
+			blocks[currentname].parts.append(expression(i, "unknown", None))
 	complexproccessing(connections, functioname.strip("@"), blocks)
-	outputToFile( functioname.strip("@"), blocks)
+	outputToFile(functioname.strip("@"), blocks)
 
 
 def main() -> None:
@@ -166,17 +197,20 @@ def main() -> None:
 			process_function(functionlist)
 
 
-def outputToFile(
-	name: str, blocks: dict[str, block]
-) -> None:
+def outputToFile(name: str, blocks: dict[str, block]) -> None:
 	outfile = Path(f"./{name}.dot")
 	x = 0
 	output = "digraph {\n"
 	nodes: dict[str, int] = {}
 	for key in blocks:
 		# this line is for testing to see what is in each block
-		# label = "\\n".join(blocks[key]).replace("\n", "\\n").replace("{", "").replace("}", "")
-		label = ""
+		label = (
+			"\\n".join([i.text for i in blocks[key].parts])
+			.replace("\n", "\\n")
+			.replace("{", "")
+			.replace("}", "")
+		)
+		# label = ""
 		output += "		Node" + str(x) + f' [shape=record,label="{label}"]\n'
 		nodes[key] = x
 		x += 1
