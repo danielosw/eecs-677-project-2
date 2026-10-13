@@ -30,18 +30,18 @@ class expression:
 
 
 class block:
-	parts: list[expression] = []
-	name: str = ""
-	connections: list[str] = []
-	referenced: list[str] = []
-	setvars: list[str] = []
+	parts: list[expression]
+	name: str
+	connections: list[str]
+	referenced: list[str]
+	setvars: list[dict[str, str]]
 
 	def __init__(
 		self,
 		name: str,
 		connections: list[str] | None = None,
 		referenced: list[str] | None = None,
-		setvars: list[str] | None = None,
+		setvars: list[dict[str, str]] | None = None,
 		parts: list[expression] | None = None,
 	):
 		self.parts = [] if parts is None else parts
@@ -51,13 +51,28 @@ class block:
 		self.setvars = [] if setvars is None else setvars
 
 
-def complexproccessing(
-	connections: dict[str, list[str]], functionname: str, blocks: dict[str, block]
-) -> None:
-	# currently we just want to do the following. starting from the first block go through each connection and check load and stores to see if we run into a sink.
+# just a bundle of information for traverse to return
+class traverseReturn:
+	# basiclly a in set order list of a being set to b
 
-	# assume the first is the entry
-	pass
+	def __init__(self, setto: list[dict[str, str]]) -> None:
+		self.setto = setto
+
+
+def traverse(
+	block: block, blocks: dict[str, block], setto: list[dict[str, str]], main: bool = True
+) -> list[dict[str, str]]:
+	# transform setto with blocks.setvars
+	# basically, if setvars has x=1 and setto has x=2, we want to transform setto to have x=1 instead of x=2
+	for i in block.setvars:
+		for j in setto:
+			if i.keys() == j.keys():
+				setto.remove(j)
+				setto.append(i)
+	for x in block.connections:
+		setto.extend(traverse(blocks[x], blocks, setto, False))
+
+	return setto
 
 
 def process_function(lines: list[str]) -> None:
@@ -148,7 +163,7 @@ def process_function(lines: list[str]) -> None:
 				continue
 
 			blocks[currentname].parts.append(expression(i, "unknown", None))
-	complexproccessing(connections, functioname.strip("@"), blocks)
+	traverse(blocks[functioname], blocks, [])
 	outputToFile(functioname.strip("@"), blocks)
 
 
