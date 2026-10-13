@@ -10,6 +10,9 @@ REGEX_BLOCK_LABEL = re.compile(r"^\s*(.*?):")
 REGEX_RETURN = re.compile(r"\bret\b")
 REGEX_CALL = re.compile(r"\bcall\b")
 REGEX_STORE = re.compile(r"store (?P<storetype>.*?) %(?P<storefrom>.*?), ptr %(?P<storeto>.*?)$")
+REGEX_STORE_CONST = re.compile(
+	r"store (?P<storetype>.*?) (?P<storefrom>.*?), ptr %(?P<storeto>.*?)$"
+)
 REGEX_SOURCE = re.compile(r"%(?P<varname>.*?) {0,}= {0,}call .*?@(.*?)\b")
 REGEX_SINK = re.compile(r"\bcall void @SINK\(.*? %(?P<varname>.*?)\)")
 REGEX_LOAD = re.compile(
@@ -185,6 +188,8 @@ def process_function(lines: list[str]) -> None:
 				SECRET_SOURCES[currentname].append(REGEX_SOURCE.search(i).group("varname"))
 
 			store = REGEX_STORE.match(i.strip())
+			if store is None:
+				store = REGEX_STORE_CONST.match(i.strip())
 			if store is not None:
 				storefrom = store.group("storefrom")
 				storeto = store.group("storeto")
