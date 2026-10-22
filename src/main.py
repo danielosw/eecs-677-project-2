@@ -1,8 +1,8 @@
 import argparse
+import contextlib
 import re
 from operator import contains
 from pathlib import Path
-import contextlib
 
 REGEX_LABEL = re.compile(r"label %(.*?)(?:\,|$)")
 REGEX_DEFINE = re.compile(r"define .*? (.*?)\(")
@@ -33,12 +33,17 @@ class expression:
 		self.text = text
 
 
-class block:
+class blockType:
 	parts: list[expression]
 	name: str
 	connections: list[str]
 	referenced: list[str]
 	setvars: list[dict[str, str]]
+	iref: set[str]
+	gref: set[str]
+	imod: set[str]
+	gmod: set[str]
+	gotosTo: set[str]
 
 	def __init__(
 		self,
@@ -53,6 +58,24 @@ class block:
 		self.connections = [] if connections is None else connections
 		self.referenced = [] if referenced is None else referenced
 		self.setvars = [] if setvars is None else setvars
+		# Immediant modified and referenced
+		self.iref = set()
+		self.imod = set()
+		# Global modified and referenced
+		self.gref = set()
+		self.gmod = set[str]()
+		self.gotosTo = set()
+
+
+class function:
+	gref: set[str]
+	fromblock: str
+	toblock: str
+
+	def __init__(self, gref: set[str], fromblock: str, toblock: str):
+		self.gref = gref
+		self.fromblock = fromblock
+		self.toblock = toblock
 
 
 # just a bundle of information for traverse to return
@@ -75,7 +98,7 @@ def resolve(name: str, values: dict[str, str]) -> str:
 
 
 def traverse(
-	block: block, blocks: dict[str, block], setto: traverseReturn, fromblocks: list[str]
+	block: blockType, blocks: dict[str, blockType], setto: traverseReturn, fromblocks: list[str]
 ) -> traverseReturn:
 	t = traverseReturn([], False)
 	values = {}
@@ -97,7 +120,6 @@ def traverse(
 			result.extend(resulting.setto)
 			if resulting.flowfound:
 				t.flowfound = True
-	fromblocks.remove(block.name)
 
 	flowed = False
 	t.setto = result
@@ -113,9 +135,67 @@ def traverse(
 			for sink in SINKS[block.name]:
 				if resolve(source, values) == resolve(sink, values):
 					flowed = True
+	fromblocks.remove(block.name)
 	if flowed:
 		t.flowfound = flowed
 	return t
+
+
+def worklist(
+	block: blockType,
+	blocks: dict[str, blockType],
+	setto: traverseReturn,
+	fromblocks: list[str],
+	functions: list[function],
+) -> dict[str, blockType]:
+	t = traverseReturn([], False)
+	values = {}
+	fromblocks.append(block.name)
+	for assignment in setto.setto:
+		for name, value in assignment.items():
+			values[name] = value
+	for assignment in block.setvars:
+		for name, value in assignment.items():
+			values[name] = resolve(value, values)
+
+	result: list[dict[str, str]] = []
+	for name, value in values.items():
+		result.append({name: value})
+	# worklist = call blocks and brs
+	# gref for each block starts as their IREF
+	# GREF for each call starts empty we can assume is returning SECRENT because that is given
+	worklist: list[blockType | function] = []
+	for block in blocks.values():
+		block.gref = block.iref.copy()
+		worklist.append(block)
+	for func in functions:
+		worklist.append(func)
+
+	while worklist:
+		current = worklist.pop()
+		if type(current) == function:
+			temp = current.gref
+			current.gref = blocks[current.toblock].gref
+			if temp != current.gref:
+				worklist.append(blocks[current.fromblock])
+
+		elif type(current) == blockType:
+			"""
+			else if element e is a function f:
+			GREFfn(f) = ⋃ GREFcall(c) for all call sites c in f ⋃ IREF(f)
+			if GREFfn(f) updated, add all call sites to f to worklist
+			"""
+			callsites = [f for f in functions if f.fromblock == current.name]
+			temp = current.gref
+			current.gref = set()
+			for call in callsites:
+				current.gref = current.gref.union(call.gref)
+			current.gref = current.gref.union(current.iref)
+			if temp != current.gref:
+				for call in callsites:
+					worklist.append(call)
+
+	return blocks
 
 
 def process_function(lines: list[str]) -> None:
@@ -127,11 +207,12 @@ def process_function(lines: list[str]) -> None:
 	# step 3: output graph
 	inblock = False
 	blocknames: list[str] = []
-	blocks: dict[str, block] = {}
+	blocks: dict[str, blockType] = {}
 	connections: dict[str, list[str]] = {}
 	currentname = ""
 	functioname = ""
 	currentcounter = 1
+	functions: list[function] = []
 	for i in lines:
 		if i.strip().startswith(";"):
 			continue
@@ -142,7 +223,7 @@ def process_function(lines: list[str]) -> None:
 				blocknames.append(define.group(1))
 				inblock = True
 				currentname = define.group(1)
-				blocks[currentname] = block(currentname)
+				blocks[currentname] = blockType(currentname)
 				functioname = currentname
 				blocks[currentname].parts.append(expression(i, "define", define))
 				SECRET_SOURCES[currentname] = []
@@ -153,7 +234,7 @@ def process_function(lines: list[str]) -> None:
 			if labels is not None:
 				blocknames.append(labels.group(1))
 				currentname = labels.group(1)
-				blocks[currentname] = block(currentname)
+				blocks[currentname] = blockType(currentname)
 
 				blocks[currentname].parts.append(expression(i, "labels", labels))
 				SECRET_SOURCES[currentname] = []
@@ -176,6 +257,7 @@ def process_function(lines: list[str]) -> None:
 				brs = REGEX_LABEL.match(i)
 				for x in brLabels:
 					blocks[currentname].connections.append(x)
+					blocks[currentname].gotosTo.add(x)
 				blocks[currentname].parts.append(expression(i, "br", brs))
 				inblock = False
 				currentcounter = 1
@@ -198,6 +280,8 @@ def process_function(lines: list[str]) -> None:
 				storeto = store.group("storeto")
 				blocks[currentname].setvars.append({storeto: storefrom})
 				blocks[currentname].referenced.extend([storefrom, storeto])
+				blocks[currentname].iref.add(storefrom)
+				blocks[currentname].imod.add(storeto)
 				blocks[currentname].parts.append(expression(i, "store", store))
 				continue
 
@@ -206,6 +290,8 @@ def process_function(lines: list[str]) -> None:
 				loadfrom = load.group("loadfrom")
 				loadto = load.group("loadto")
 				blocks[currentname].setvars.append({loadto: loadfrom})
+				blocks[currentname].iref.add(loadfrom)
+				blocks[currentname].imod.add(loadto)
 				blocks[currentname].referenced.extend([loadto, loadfrom])
 				blocks[currentname].parts.append(expression(i, "load", load))
 				continue
@@ -215,13 +301,14 @@ def process_function(lines: list[str]) -> None:
 				callname = currentname + str(currentcounter)
 				returnname = currentname + str(currentcounter + 1)
 				blocks[currentname].connections.append(callname)
-				blocks[callname] = block(
+				blocks[callname] = blockType(
 					callname,
 					connections=[returnname],
 					parts=[expression(i, "call", call)],
 				)
+				functions.append(function(set(), currentname, callname))
 				connections[callname] = [returnname]
-				blocks[returnname] = block(returnname)
+				blocks[returnname] = blockType(returnname)
 				currentname = returnname
 				SECRET_SOURCES[currentname] = []
 				SINKS[currentname] = []
@@ -229,13 +316,14 @@ def process_function(lines: list[str]) -> None:
 				continue
 
 			blocks[currentname].parts.append(expression(i, "unknown", None))
-	traverse_result = traverse(
+	traverse_result: traverseReturn = traverse(
 		blocks[functioname], blocks, traverseReturn([], False), [functioname]
 	)
 	if traverse_result.flowfound:
 		print("FLOW")
 	else:
 		print("NO FLOW")
+
 	outputToFile(functioname.strip("@"), blocks)
 
 
@@ -284,7 +372,7 @@ def main() -> None:
 			process_function(functionlist)
 
 
-def outputToFile(name: str, blocks: dict[str, block]) -> None:
+def outputToFile(name: str, blocks: dict[str, blockType]) -> None:
 	outfile = Path(f"./{name}.dot")
 	x = 0
 	output = "digraph {\n"
