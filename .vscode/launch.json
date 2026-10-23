@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "src/main.py",
             "args": [
-                "test/test1.ll"
+                "test/test3.ll"
             ],
             "console": "integratedTerminal"
         }
