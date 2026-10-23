@@ -1,18 +1,8 @@
 digraph {
-		Node0 [shape=record,label="define i32 @main() \n\n  %aVar = alloca i32\n\n  store i32 0, ptr %aVar\n\n  br label %loop\n"]
-		Node1 [shape=record,label="loop:\n\n  %loaded = load i32, ptr %aVar\n"]
-		Node2 [shape=record,label="  call void @SINK(i32 %loaded)\n"]
-		Node3 [shape=record,label="  %cond = icmp eq i32 0, 0\n\n  br i1 %cond, label %body, label %exit\n"]
-		Node4 [shape=record,label="body:\n"]
-		Node5 [shape=record,label="  %secret = call i32 (...) @SOURCE()\n"]
-		Node6 [shape=record,label="  store i32 %secret, ptr %aVar\n\n  br label %loop\n"]
-		Node7 [shape=record,label="exit:\n\n  ret i32 0\n"]
+		Node0 [shape=record,label="define i32 @main() \n\n  %aVar = alloca i32\n\n  store i32 0, ptr %aVar\n\n  %a1 = load i32, ptr %aVar\n\n  %ifTruth = icmp ne i32 %a1, 0\n\n  br i1 %ifTruth, label %ifBody, label %afterIf\n"]
+		Node1 [shape=record,label="ifBody:\n\n  %secret = call i32 (...) @SOURCE()\n\n  store i32 %secret, ptr %aVar\n\n  br label %afterIf\n"]
+		Node2 [shape=record,label="afterIf:\n\n  %a2 = load i32, ptr %aVar\n\n  call void @SINK(i32 %a2)\n\n  ret i32 0\n"]
 		Node0 -> Node1 [label=0];
+		Node0 -> Node2 [label=1];
 		Node1 -> Node2 [label=0];
-		Node2 -> Node3 [label=0];
-		Node3 -> Node4 [label=0];
-		Node3 -> Node7 [label=1];
-		Node4 -> Node5 [label=0];
-		Node5 -> Node6 [label=0];
-		Node6 -> Node1 [label=0];
 }
