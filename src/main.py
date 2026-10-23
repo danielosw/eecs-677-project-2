@@ -80,11 +80,11 @@ class function:
 
 # just a bundle of information for traverse to return
 class traverseReturn:
-	# basiclly a in set order list of a being set to b
-	setto: list[dict[str, str]]
+	# Set of variable assignments represented as (name, value) pairs.
+	setto: set[tuple[str, str]]
 	flowfound: bool
 
-	def __init__(self, setto: list[dict[str, str]], flowfound: bool) -> None:
+	def __init__(self, setto: set[tuple[str, str]], flowfound: bool) -> None:
 		self.setto = setto
 		self.flowfound = flowfound
 
@@ -100,24 +100,23 @@ def resolve(name: str, values: dict[str, str]) -> str:
 def traverse(
 	block: blockType, blocks: dict[str, blockType], setto: traverseReturn, fromblocks: list[str]
 ) -> traverseReturn:
-	t = traverseReturn([], False)
+	t = traverseReturn(set(), False)
 	values = {}
 	fromblocks.append(block.name)
-	for assignment in setto.setto:
-		for name, value in assignment.items():
-			values[name] = value
+	for name, value in setto.setto:
+		values[name] = value
 	for assignment in block.setvars:
 		for name, value in assignment.items():
 			values[name] = resolve(value, values)
 
-	result: list[dict[str, str]] = []
+	result: set[tuple[str, str]] = set()
 	for name, value in values.items():
-		result.append({name: value})
+		result.add((name, value))
 	t.setto = result
 	for next_block in block.connections:
 		if next_block in blocks and next_block not in fromblocks:
 			resulting = traverse(blocks[next_block], blocks, t, fromblocks)
-			result.extend(resulting.setto)
+			result.update(resulting.setto)
 			if resulting.flowfound:
 				t.flowfound = True
 
@@ -127,10 +126,10 @@ def traverse(
 		# list of all preceding sources
 		# includeds previus blocks sources
 
-		possible_sources = []
+		possible_sources = set()
 		for fromblock in fromblocks:
 			with contextlib.suppress(KeyError):
-				possible_sources.extend(SECRET_SOURCES[fromblock])
+				possible_sources.update(SECRET_SOURCES[fromblock])
 		for source in possible_sources:
 			for sink in SINKS[block.name]:
 				if resolve(source, values) == resolve(sink, values):
@@ -148,12 +147,11 @@ def worklist(
 	fromblocks: list[str],
 	functions: list[function],
 ) -> dict[str, blockType]:
-	t = traverseReturn([], False)
+	t = traverseReturn(set(), False)
 	values = {}
 	fromblocks.append(block.name)
-	for assignment in setto.setto:
-		for name, value in assignment.items():
-			values[name] = value
+	for name, value in setto.setto:
+		values[name] = value
 	for assignment in block.setvars:
 		for name, value in assignment.items():
 			values[name] = resolve(value, values)
@@ -317,7 +315,7 @@ def process_function(lines: list[str]) -> None:
 
 			blocks[currentname].parts.append(expression(i, "unknown", None))
 	traverse_result: traverseReturn = traverse(
-		blocks[functioname], blocks, traverseReturn([], False), [functioname]
+		blocks[functioname], blocks, traverseReturn(set(), False), [functioname]
 	)
 	if traverse_result.flowfound:
 		print("FLOW")
