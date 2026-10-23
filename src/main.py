@@ -81,12 +81,14 @@ class function:
 # just a bundle of information for traverse to return
 class traverseReturn:
 	# Set of variable assignments represented as (name, value) pairs.
-	setto: set[tuple[str, str]]
+	setto: list[dict[str, str]]
 	flowfound: bool
+	sources: set[str]
 
-	def __init__(self, setto: set[tuple[str, str]], flowfound: bool) -> None:
+	def __init__(self, setto: list[dict[str, str]], flowfound: bool, sources: set[str]) -> None:
 		self.setto = setto
 		self.flowfound = flowfound
+		self.sources = sources
 
 
 def resolve(name: str, values: dict[str, str]) -> str:
@@ -264,12 +266,15 @@ def process_function(lines: list[str]) -> None:
 			if sink:
 				namer = sink.group("varname")
 				SINKS[currentname].append(namer)
+			source_match = REGEX_SOURCE.search(i)
 
-			if REGEX_SOURCE.search(i):
+			if source_match:
 				# add the source to the secret sources list
-				SECRET_SOURCES[currentname].append(REGEX_SOURCE.search(i).group("varname"))
-
+				source_name = source_match.group("varname")
+				SECRET_SOURCES[currentname].append(source_name)
+				blocks[currentname].setvars.append({source_name: source_name})
 			store = REGEX_STORE.match(i.strip())
+
 			# dumb hack to handle constants in store not matching the standerd one.
 			if store is None:
 				store = REGEX_STORE_CONST.match(i.strip())
