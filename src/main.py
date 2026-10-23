@@ -99,103 +99,40 @@ def resolve(name: str, values: dict[str, str]) -> str:
 	return name
 
 
-def traverse(
-	block: blockType, blocks: dict[str, blockType], setto: traverseReturn, fromblocks: list[str]
-) -> traverseReturn:
-	t = traverseReturn(set(), False)
-	values = {}
-	fromblocks.append(block.name)
-	for name, value in setto.setto:
-		values[name] = value
-	for assignment in block.setvars:
-		for name, value in assignment.items():
-			values[name] = resolve(value, values)
-
-	result: set[tuple[str, str]] = set()
-	for name, value in values.items():
-		result.add((name, value))
-	t.setto = result
-	for next_block in block.connections:
-		if next_block in blocks and next_block not in fromblocks:
-			resulting = traverse(blocks[next_block], blocks, t, fromblocks)
-			result.update(resulting.setto)
-			if resulting.flowfound:
-				t.flowfound = True
-
-	flowed = False
-	t.setto = result
-	if block.name in SINKS:
-		# list of all preceding sources
-		# includeds previus blocks sources
-
-		possible_sources = set()
-		for fromblock in fromblocks:
-			with contextlib.suppress(KeyError):
-				possible_sources.update(SECRET_SOURCES[fromblock])
-		for source in possible_sources:
-			for sink in SINKS[block.name]:
-				if resolve(source, values) == resolve(sink, values):
-					flowed = True
-	fromblocks.remove(block.name)
-	if flowed:
-		t.flowfound = flowed
-	return t
-
-
 def worklist(
-	block: blockType,
 	blocks: dict[str, blockType],
-	setto: traverseReturn,
-	fromblocks: list[str],
-	functions: list[function],
-) -> dict[str, blockType]:
-	t = traverseReturn(set(), False)
-	values = {}
-	fromblocks.append(block.name)
-	for name, value in setto.setto:
-		values[name] = value
-	for assignment in block.setvars:
-		for name, value in assignment.items():
-			values[name] = resolve(value, values)
+) -> bool:
+	# return true if there is a flow from a secret source to a sink
+	work: list[tuple[str, blockType]] = list(blocks.items())
+	while work:
+		current = work.pop()
+		name, block = current
+		for connection in block.connections:
+			if connection in blocks:
+				connected_block = blocks[connection]
+				# Merge referenced and setvars
+				merged_referenced = set[str](block.referenced) | set(connected_block.referenced)
+				merged_setvars = set()
+				merged_setvars.update(block.setvars)
+				merged_setvars.update(connected_block.setvars)
+				new_setvars = [{name: value} for name, value in merged_setvars]
+				if merged_referenced != set(block.referenced) or new_setvars != block.setvars:
+					block.referenced = list(merged_referenced)
+					block.setvars = new_setvars
+					work.append((name, block))
+				else:
+					# No change, continue to next connection
+					continue
+			else:
+				# Connection not found in blocks, continue to next connection
+				continue
+	print("Final block states:")
+	for name, block in blocks.items():
+		print(f"  {name}: referenced={block.referenced}, setvars={block.setvars}")
 
-	result: list[dict[str, str]] = []
-	for name, value in values.items():
-		result.append({name: value})
-	# worklist = call blocks and brs
-	# gref for each block starts as their IREF
-	# GREF for each call starts empty we can assume is returning SECRENT because that is given
-	worklist: list[blockType | function] = []
-	for block in blocks.values():
-		block.gref = block.iref.copy()
-		worklist.append(block)
-	for func in functions:
-		worklist.append(func)
-
-	while worklist:
-		current = worklist.pop()
-		if type(current) == function:
-			temp = current.gref
-			current.gref = blocks[current.toblock].gref
-			if temp != current.gref:
-				worklist.append(blocks[current.fromblock])
-
-		elif type(current) == blockType:
-			"""
-			else if element e is a function f:
-			GREFfn(f) = ⋃ GREFcall(c) for all call sites c in f ⋃ IREF(f)
-			if GREFfn(f) updated, add all call sites to f to worklist
-			"""
-			callsites = [f for f in functions if f.fromblock == current.name]
-			temp = current.gref
-			current.gref = set()
-			for call in callsites:
-				current.gref = current.gref.union(call.gref)
-			current.gref = current.gref.union(current.iref)
-			if temp != current.gref:
-				for call in callsites:
-					worklist.append(call)
-
-	return blocks
+	print(work)
+	return True
+	pass
 
 
 def process_function(lines: list[str]) -> None:
@@ -319,10 +256,8 @@ def process_function(lines: list[str]) -> None:
 				continue
 
 			blocks[currentname].parts.append(expression(i, "unknown", None))
-	traverse_result: traverseReturn = traverse(
-		blocks[functioname], blocks, traverseReturn(set(), False), [functioname]
-	)
-	if traverse_result.flowfound:
+
+	if worklist(blocks):
 		print("FLOW")
 	else:
 		print("NO FLOW")
